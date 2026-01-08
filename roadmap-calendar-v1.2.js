@@ -1,0 +1,366 @@
+/*
+ROADMAP CALENDAR v1.2 – SOURCE CODE (DOCUMENTED COPY)
+
+This file contains the full JavaScript source code of the Roadmap Calendar.
+The operational version must be used as .js.
+This .txt version is provided for audit and documentation purposes.
+*/
+const TEST_MODE = true;
+
+
+[SEE PROVIDED JS SOURCE – IDENTICAL TO roadmap-calendar-v1.2.js]
+
+
+
+
+/* =========================================================
+   ROADMAP CALENDAR – VERSION 1.2 (FINAL, STABLE)
+   SharePoint 2016 – Edge
+   ========================================================= */
+
+(function () {
+
+  /* =========================
+     CONFIGURATION
+     ========================= */
+
+  const CONFIG = {
+    siteUrl: "/sites/MySite",
+    listName: "Calendar",
+
+    fields: {
+      id: "Id",
+      title: "Title",
+      start: "EventDate",
+      end: "EndDate",
+      category: "Category",
+      loe: "LOE",
+      component: "Component",
+      priority: "Priority",
+      description: "Description",
+      location: "Location",
+      opr: "OPR",
+      support: "Support"
+    },
+
+    filterableFields: ["category", "loe", "component", "priority"],
+    dayWidthPx: 24,
+    cacheTTLMinutes: 15,
+
+    linkTemplate: id =>
+      `/sites/MySite/Lists/Calendar/DispForm.aspx?ID=${id}`
+  };
+
+  /* =========================
+     CSS INJECTION
+     ========================= */
+
+  (function injectCSS() {
+    if (document.getElementById("roadmap-css")) return;
+
+    const s = document.createElement("style");
+    s.id = "roadmap-css";
+    s.textContent = `
+      #controls { margin-bottom: 10px; }
+      #filters > div { display:inline-block; margin-right:20px; font-size:12px; }
+      #kpi { display:flex; gap:20px; margin:12px 0; font-size:12px; }
+      .kpi-box { border:1px solid #999; padding:6px 10px; background:#f5f5f5; }
+
+      #roadmap h2 { margin-top:32px; }
+      #roadmap h3 { margin:12px 0 4px; padding-left:6px; border-left:4px solid #888; }
+
+      .lane { display:grid; margin-bottom:4px; }
+
+      .event {
+        background:#eaeaea;
+        border:1px solid #000;
+        font-size:11px;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        padding:1px 3px;
+        cursor:pointer;
+      }
+
+      .event.critical { border:2px solid red; font-weight:bold; }
+      .event.cont-start { border-left-style:dashed !important; }
+      .event.cont-end { border-right-style:dashed !important; }
+
+      .event[data-loe="Strategic"]   { border-left:6px solid #003366; }
+      .event[data-loe="Operational"] { border-left:6px solid #2e7d32; }
+      .event[data-loe="Tactical"]    { border-left:6px solid #ef6c00; }
+
+      @media print {
+        #filters, #controls { display:none !important; }
+        h2 { page-break-before:always; }
+        h2:first-of-type { page-break-before:auto; }
+        .event {
+          background:#fff !important;
+          color:#000 !important;
+          border:1px solid #000 !important;
+        }
+      }
+    `;
+    document.head.appendChild(s);
+  })();
+
+  /* =========================
+     STATE
+     ========================= */
+
+  let allEvents = [];
+  const activeFilters = {};
+  CONFIG.filterableFields.forEach(f => activeFilters[f] = new Set());
+
+  /* =========================
+     DATE UTILITIES
+     ========================= */
+
+  function daysBetween(a, b) {
+    return Math.round((b - a) / 86400000) + 1;
+  }
+
+  function isoWeek(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  }
+
+  function periodBounds(year, quarter) {
+    if (!quarter) {
+      return {
+        start: `${year}-01-01T00:00:00Z`,
+        end: `${year}-12-31T23:59:59Z`
+      };
+    }
+    const m = (quarter - 1) * 3;
+    const start = new Date(Date.UTC(year, m, 1));
+    const end = new Date(Date.UTC(year, m + 3, 0, 23, 59, 59));
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+
+  /* =========================
+     CACHE (sessionStorage)
+     ========================= */
+
+  function cacheKey(y, q) {
+    return `roadmap_${y}_${q || "year"}`;
+  }
+
+  function getCached(y, q) {
+    const raw = sessionStorage.getItem(cacheKey(y, q));
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    const age = (Date.now() - obj.timestamp) / 60000;
+    return age <= CONFIG.cacheTTLMinutes ? obj.data : null;
+  }
+
+  function setCached(y, q, data) {
+    sessionStorage.setItem(
+      cacheKey(y, q),
+      JSON.stringify({ timestamp: Date.now(), data })
+    );
+  }
+
+  /* =========================
+     REST SHAREPOINT
+     ========================= */
+
+  function buildRestUrl(year, quarter) {
+    const { start, end } = periodBounds(year, quarter);
+    const f = CONFIG.fields;
+
+    return `${CONFIG.siteUrl}/_api/web/lists/GetByTitle('${CONFIG.listName}')/items` +
+      `?$select=${Object.values(f).join(",")}` +
+      `&$filter=${f.start} le datetime'${end}' and ${f.end} ge datetime'${start}'`;
+  }
+
+  async function fetchEvents(year, quarter) {
+  if (TEST_MODE) {
+    const res = await fetch("mock-calendar.json");
+    const data = await res.json();
+    return data.map(normalizeEvent);
+  }
+
+  // mode SharePoint normal
+  const cached = getCached(year, quarter);
+  if (cached) return cached;
+
+  const res = await fetch(buildRestUrl(year, quarter), {
+    headers: { Accept: "application/json;odata=verbose" }
+  });
+
+  const json = await res.json();
+  const data = json.d.results.map(normalizeEvent);
+  setCached(year, quarter, data);
+  return data;
+}
+
+  /* =========================
+     NORMALIZATION
+     ========================= */
+
+  function normalizeEvent(ev) {
+    const f = CONFIG.fields;
+    return {
+      id: ev[f.id],
+      title: ev[f.title],
+      start: new Date(ev[f.start]),
+      end: new Date(ev[f.end]),
+      category: ev[f.category] || "Other",
+      loe: ev[f.loe] || "",
+      component: ev[f.component] || "",
+      priority: ev[f.priority] || 3,
+      description: ev[f.description] || "",
+      location: ev[f.location] || "",
+      opr: ev[f.opr] || "",
+      support: ev[f.support] || ""
+    };
+  }
+
+  /* =========================
+     FILTERS
+     ========================= */
+
+  function applyFilters(events) {
+    return events.filter(ev =>
+      Object.entries(activeFilters).every(([f, set]) =>
+        set.size === 0 || set.has(ev[f])
+      )
+    );
+  }
+
+  /* =========================
+     KPI
+     ========================= */
+
+  function renderKPI(events) {
+    const c = document.getElementById("kpi");
+    if (!c) return;
+
+    const total = events.length;
+    const critical = events.filter(e => e.priority === 1).length;
+
+    c.innerHTML =
+      `<div class="kpi-box"><b>Total événements</b><br>${total}</div>` +
+      `<div class="kpi-box"><b>CR critiques</b><br>${critical}</div>`;
+  }
+
+  /* =========================
+     LANES & INTERSECTION
+     ========================= */
+
+  function intersect(ev, ms, me) {
+    const vs = new Date(Math.max(ev.start, ms));
+    const ve = new Date(Math.min(ev.end, me));
+    if (vs > ve) return null;
+
+    return {
+      ...ev,
+      visibleStart: vs,
+      visibleEnd: ve,
+      duration: daysBetween(vs, ve),
+      startsBeforeMonth: ev.start < ms,
+      endsAfterMonth: ev.end > me
+    };
+  }
+
+  function buildLanes(events) {
+    const lanes = [];
+    events.sort((a, b) => a.visibleStart - b.visibleStart);
+
+    events.forEach(ev => {
+      let placed = false;
+      for (const lane of lanes) {
+        if (lane.until < ev.visibleStart) {
+          lane.events.push(ev);
+          lane.until = ev.visibleEnd;
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) lanes.push({ until: ev.visibleEnd, events: [ev] });
+    });
+
+    return lanes;
+  }
+
+  /* =========================
+     RENDERING
+     ========================= */
+
+  function renderRoadmap(events) {
+    const container = document.getElementById("roadmap");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const byMonth = {};
+    events.forEach(ev => {
+      const key = `${ev.start.getFullYear()}-${ev.start.getMonth()}`;
+      (byMonth[key] ||= []).push(ev);
+    });
+
+    Object.entries(byMonth).forEach(([key, list]) => {
+      const [y, m] = key.split("-");
+      const ms = new Date(y, m, 1);
+      const me = new Date(y, +m + 1, 0);
+
+      const h2 = document.createElement("h2");
+      h2.textContent = ms.toLocaleString("fr", { month: "long", year: "numeric" });
+      container.append(h2);
+
+      buildLanes(list.map(e => intersect(e, ms, me)).filter(Boolean))
+        .forEach(lane => {
+          const row = document.createElement("div");
+          row.className = "lane";
+          row.style.gridTemplateColumns =
+            `repeat(${me.getDate()}, ${CONFIG.dayWidthPx}px)`;
+
+          lane.events.forEach(ev => {
+            const d = document.createElement("div");
+            d.className = "event" + (ev.priority === 1 ? " critical" : "");
+            if (ev.startsBeforeMonth) d.classList.add("cont-start");
+            if (ev.endsAfterMonth) d.classList.add("cont-end");
+
+            d.dataset.loe = ev.loe;
+            d.style.gridColumn =
+              `${ev.visibleStart.getDate()} / span ${ev.duration}`;
+            d.textContent = ev.title;
+
+            d.onclick = () =>
+              window.open(CONFIG.linkTemplate(ev.id), "_blank");
+
+            row.append(d);
+          });
+
+          container.append(row);
+        });
+    });
+  }
+
+  /* =========================
+     LOAD & INIT
+     ========================= */
+
+  async function refresh() {
+    const filtered = applyFilters(allEvents);
+    renderKPI(filtered);
+    renderRoadmap(filtered);
+  }
+
+  async function load() {
+    const year = document.getElementById("year")?.value;
+    const quarter = document.getElementById("quarter")?.value || null;
+    allEvents = await fetchEvents(year, quarter);
+    refresh();
+  }
+
+  document.addEventListener("DOMContentLoaded", load);
+
+
+alert("JS exécuté !");
+console.log("JS OK");
+})();

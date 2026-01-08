@@ -1,0 +1,72 @@
+[
+  {
+    "Id": 1,
+    "Title": "CR-001 – Upgrade ILIAS",
+    "EventDate": "2026-01-05T00:00:00Z",
+    "EndDate": "2026-01-20T23:59:59Z",
+    "Category": "Change Request",
+    "LOE": "Strategic",
+    "Component": "ILIAS",
+    "Priority": 1,
+    "Description": "Upgrade majeur de la plateforme ILIAS",
+    "Location": "Bruxelles",
+    "OPR": "J6",
+    "Support": "DGH"
+  },
+  {
+    "Id": 2,
+    "Title": "Exercise STEADFAST",
+    "EventDate": "2026-01-15T00:00:00Z",
+    "EndDate": "2026-02-10T23:59:59Z",
+    "Category": "Operation",
+    "LOE": "Operational",
+    "Component": "Land",
+    "Priority": 2,
+    "Description": "Exercice multinational OTAN",
+    "Location": "DE / PL",
+    "OPR": "J3",
+    "Support": "OPS"
+  },
+  {
+    "Id": 3,
+    "Title": "Maintenance réseau",
+    "EventDate": "2026-02-03T00:00:00Z",
+    "EndDate": "2026-02-05T23:59:59Z",
+    "Category": "Maintenance",
+    "LOE": "Tactical",
+    "Component": "Network",
+    "Priority": 3,
+    "Description": "Fenêtre de maintenance planifiée",
+    "Location": "DC Central",
+    "OPR": "CIS",
+    "Support": "IT"
+  },
+  {
+    "Id": 4,
+    "Title": "CR-014 – Sécurité applicative",
+    "EventDate": "2026-02-01T00:00:00Z",
+    "EndDate": "2026-03-15T23:59:59Z",
+    "Category": "Change Request",
+    "LOE": "Strategic",
+    "Component": "Security",
+    "Priority": 1,
+    "Description": "Durcissement sécurité des applications critiques",
+    "Location": "Bruxelles",
+    "OPR": "RSSI",
+    "Support": "Cyber"
+  },
+  {
+    "Id": 5,
+    "Title": "Formation officiers IT",
+    "EventDate": "2026-03-10T00:00:00Z",
+    "EndDate": "2026-03-25T23:59:59Z",
+    "Category": "Training",
+    "LOE": "Operational",
+    "Component": "Personnel",
+    "Priority": 2,
+    "Description": "Cycle de formation IT avancée",
+    "Location": "Ecole Militaire",
+    "OPR": "HR",
+    "Support": "Academy"
+  }
+]
